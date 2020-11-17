@@ -1,8 +1,8 @@
 import torch.nn.functional as F
 
-from .utils.google_utils import *
-from .utils.parse_config import *
-from .utils.utils import *
+from utils.google_utils import *
+from utils.parse_config import *
+from utils.utils import *
 
 ONNX_EXPORT = False
 
@@ -447,3 +447,49 @@ def attempt_download(weights):
         if not (r == 0 and os.path.exists(weights) and os.path.getsize(weights) > 1E6):  # weights exist and > 1MB
             os.system('rm ' + weights)  # remove partial downloads
             raise Exception(msg)
+
+def fine_tuning(model, optimizer, lr_backbone, lr_head, weight_decay, momentum):
+
+    cutoff = 75
+    # Optimizer
+
+    # Optimizer
+    darknetOther, darknetConv2dWeight, darknetBias = [], [], []  # optimizer parameter groups
+    headOther, headConv2dWeight, headBias = [], [], []  # optimizer parameter groups
+
+    for k, v in dict(model.named_parameters()).items():
+        layer_num = int(k.split('.')[1])
+        if '.bias' in k:
+            if layer_num < cutoff:
+                darknetBias += [v]
+            else:
+                headBias += [v]
+
+        elif 'Conv2d.weight' in k:
+            if layer_num < cutoff:
+                darknetConv2dWeight += [v]
+            else:
+                headConv2dWeight += [v]
+        else:
+            if layer_num < cutoff:
+                darknetOther += [v]  # all else
+            else:
+                headOther += [v]
+
+    if optimizer.__name__ == 'Adam':
+        optimizer([
+            {'params': darknetOther, 'lr': lr_backbone},
+            {'params': darknetBias, 'lr': lr_backbone},  # add pg1 with weight_decay
+            {'params': darknetConv2dWeight, 'lr': lr_backbone, 'weight_decay': weight_decay},  # add pg2 (biases)
+            {'params': headConv2dWeight, 'weight_decay': weight_decay}
+        ], lr_head)  # add pg2 (biases)
+
+    elif optimizer.__name__ == 'SGD':
+        optimizer_ = optimizer([
+                                {'params': darknetOther, 'lr': lr_backbone},
+                                {'params': darknetBias, 'lr': lr_backbone},  # add pg1 with weight_decay
+                                {'params': darknetConv2dWeight, 'lr': lr_backbone, 'weight_decay': weight_decay},  # add pg2 (biases)
+                                {'params': headConv2dWeight, 'weight_decay': weight_decay}
+                                  ],lr_head, momentum=momentum, nesterov=True)  # add pg2 (biases)
+
+    return optimizer_

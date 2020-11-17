@@ -66,7 +66,7 @@ def detect(opt, save_img=False):
         torch.backends.cudnn.benchmark = True  # set True to speed up constant image size inference
         dataset = LoadStreams(source, img_size=img_size, half=half)
     else:
-        save_img = True
+        save_img = False
         dataset = LoadImages(source, img_size=img_size, half=half)
 
     # Get names and colors
@@ -97,11 +97,12 @@ def detect(opt, save_img=False):
         # Process detections
         for i, det in enumerate(pred):  # detections per image
             if webcam:  # batch_size >= 1
-                p, s, im00 = path[i], '%g: ' % i, im0s[i]
+                p, s, im0 = path[i], '%g: ' % i, im0s[i]
             else:
-                p, s, im00 = path, '', im0s
+                p, s, im0 = path, '', im0s
 
-            im0 = np.ascontiguousarray(im00)
+            org_img = im0.copy()
+
             save_path = str(Path(out) / Path(p).name)
             s += '%gx%g ' % img.shape[2:]  # print string
             if det is not None and len(det):
@@ -114,7 +115,7 @@ def detect(opt, save_img=False):
                     s += '%g %ss, ' % (n, names[int(c)])  # add to string
 
                 # Write results
-                for *xyxy, conf, cls in det:
+                for det_ind, (*xyxy, conf, cls) in enumerate(det):
                     if save_txt:  # Write to file
                         with open(save_path + '.txt', 'a') as file:
                             file.write(('%g ' * 6 + '\n') % (*xyxy, cls, conf))
@@ -123,12 +124,17 @@ def detect(opt, save_img=False):
                         label = '%s %.2f' % (names[int(cls)], conf)
                         plot_one_box(xyxy, im0, label=label, color=colors[int(cls)])
 
+                        bbox_ouput_path = str(Path(p).parent).replace('images', 'bbox')
+                        crop_and_save_bbox(xyxy, org_img, str(Path(p)), bbox_ouput_path, cls, conf, det_ind)
+
+
+
             # Print time (inference + NMS)
             print('%sDone. (%.3fs)' % (s, time.time() - t))
 
             # Stream results
             if view_img:
-                cv2.imshow(p, im0)
+                cv2.imshow('img', im0)
                 if cv2.waitKey(1) == ord('q'):  # q to quit
                     raise StopIteration
 
@@ -155,13 +161,37 @@ def detect(opt, save_img=False):
 
     print('Done. (%.3fs)' % (time.time() - t0))
 
+def crop_and_save_bbox(xyxy, org_img, img_path, output_path, cls, conf, bbox_ind):
+    ' 000080' in img_path
+    x0, y0, x1, y1 = [int(coord.item()) for coord in xyxy]
+    bbox = org_img[y0:y1, x0:x1]
+
+    org_label_path = img_path.replace('images', 'labels').replace('Beauty', 'ObjectID')
+    org_label = cv2.imread(org_label_path)
+    label = org_label[y0:y1, x0:x1]
+
+    img_name = img_path.split('/')[-1]
+    bbox_name = img_name.split('_')
+    bbox_name.insert(1, str(bbox_ind))
+    bbox_name = "_".join(bbox_name)
+
+    output_bbox_path = output_path + '/images/' + bbox_name
+    output_label_path = output_bbox_path.replace('images', 'labels')
+
+    os.makedirs(output_path + '/images/', exist_ok=True)
+    os.makedirs(output_path + '/labels/', exist_ok=True)
+
+    if cls in [0, 2, 7, 6] and conf > 0.75:
+        cv2.imwrite(output_bbox_path, bbox)
+        cv2.imwrite(output_label_path, label)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--cfg', type=str, default='cfg/yolov3.cfg', help='*.cfg path')
-    parser.add_argument('--names', type=str, default='data/followme.names', help='*.names path')
-    parser.add_argument('--weights', type=str, default='weights/last.pt', help='path to weights file')
-    parser.add_argument('--source', type=str, default='/home/amit/Data/FollowMeDataset/England-2020-25-10/images', help='source')  # input file/folder, 0 for webcam
+    parser.add_argument('--names', type=str, default='data/coco.names', help='*.names path')
+    parser.add_argument('--weights', type=str, default='weights/yolov3.pt', help='path to weights file')
+    parser.add_argument('--source', type=str, default='data/samples', help='source')  # input file/folder, 0 for webcam
     parser.add_argument('--output', type=str, default='output', help='output folder')  # output folder
     parser.add_argument('--img-size', type=int, default=416, help='inference size (pixels)')
     parser.add_argument('--conf-thres', type=float, default=0.3, help='object confidence threshold')

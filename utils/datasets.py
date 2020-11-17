@@ -10,11 +10,13 @@ from threading import Thread
 import cv2
 import numpy as np
 import torch
-from PIL import Image, ExifTags
+from PIL import Image, ExifTags, ImageFile
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
 from .utils import xyxy2xywh, xywh2xyxy
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 help_url = 'https://github.com/ultralytics/yolov3/wiki/Train-Custom-Data'
 img_formats = ['.bmp', '.jpg', '.jpeg', '.png', '.tif', '.dng']
@@ -95,7 +97,12 @@ class LoadImages:  # for inference
         else:
             # Read image
             self.count += 1
-            img0 = cv2.imread(path)  # BGR
+            img_pil = Image.open(path)
+            img0 = np.asarray(img_pil)
+            if img0.ndim < 3:
+                img0 = cv2.cvtColor(img0, cv2.COLOR_GRAY2RGB)
+
+            img0 = img0[:, :, ::-1]  # BGR
             assert img0 is not None, 'Image Not Found ' + path
             print('image %g/%g %s: ' % (self.count, self.nF, path), end='')
 
@@ -517,7 +524,15 @@ def load_image(self, index):
     img = self.imgs[index]
     if img is None:  # not cached
         img_path = self.img_files[index]
-        img = cv2.imread(img_path)  # BGR
+        # img = cv2.imread(img_path)  # BGR
+
+        # if img is None:
+        img_pil = Image.open(img_path)
+        img = np.asarray(img_pil)
+        if len(img.shape) < 3:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+        img = img[:, :, ::-1] # BGR
+
         assert img is not None, 'Image Not Found ' + img_path
         h0, w0 = img.shape[:2]  # orig hw
         r = self.img_size / max(h0, w0)  # resize image to img_size
